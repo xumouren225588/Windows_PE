@@ -47,7 +47,6 @@ outputfolder will contain:
         exit 1
     }
     
-    copy-item -path "$adkPATH\Deployment Tools\amd64\Oscdimg\efisys_noprompt.bin" -Destination "$workingDirectory\WinPE_$arch\fwfiles\efisys.bin"
     $global:orisize=get-item -path "$ISO_root\sources\boot.wim" | Select-Object -ExpandProperty length
 }
 
