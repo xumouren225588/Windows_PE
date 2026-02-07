@@ -46,7 +46,7 @@ outputfolder will contain:
         set-location $old_loc
         exit 1
     }
-    remove-item -path "$workingDirectory\WinPE_$arch\fwfiles\efisys.bin" #fix press key to boot from dvd
+    
     copy-item -path "$adkPATH\Deployment Tools\amd64\Oscdimg\efisys_noprompt.bin" -Destination "$workingDirectory\WinPE_$arch\fwfiles\efisys.bin"
     $global:orisize=get-item -path "$ISO_root\sources\boot.wim" | Select-Object -ExpandProperty length
 }
@@ -146,11 +146,6 @@ Add files & folders to WinPE (Boot.wim)
 only from .\source\_winpe where name does not contain .ignore
 #>
 
-# replace the old background
-    takeown /f "$WinPE_root\Windows\system32\winpe.jpg"
-    icacls "$WinPE_root\Windows\system32\winpe.jpg" /grant everyone:f
-    Remove-Item "$WinPE_root\Windows\system32\winpe.jpg"
-    Copy-Item -Path "$workingdirectory\source\winpe.jpg" -Destination "$WinPE_root\Windows\system32\winpe.jpg" -Force
 
 
 #custom files:
@@ -182,40 +177,18 @@ General notes
 	#DeploymentMonitoringTool.exe (no download, direct included)
 	#CMTrace.exe (no download, direct included)
 	
-	#process explorer
-    invoke-restmethod -OutFile ".\temp\ProcessExplorer.zip" -uri "https://download.sysinternals.com/files/ProcessExplorer.zip"
-    7z t ".\temp\ProcessExplorer.zip"
-    if($LASTEXITCODE -eq 0){
-        7z x -y ".\temp\ProcessExplorer.zip" -o".\temp" 
-        copy-item -path ".\temp\procexp64.exe" -Destination "$WinPE_root\windows\system32\" -verbose
-    }
 	
     #7zip
-    invoke-restmethod -OutFile ".\temp\7z2107-x64.exe" -uri "https://www.7-zip.org/a/7z2107-x64.exe"
-    7z t ".\temp\7z2107-x64.exe"
+    invoke-restmethod -OutFile ".\temp\7z2501-x64.exe" -uri "https://www.7-zip.org/a/7z2501-x64.exe"
+    7z t ".\temp\7z2501-x64.exe"
     if($LASTEXITCODE -eq 0){
-        7z x -y ".\temp\7z2107-x64.exe" -o"$WinPE_root\Program Files\7-Zip" 
+        7z x -y ".\temp\7z2501-x64.exe" -o"$WinPE_root\Program Files\7-Zip" 
     }
-    # Powershell 7.2.2
+    # Powershell 7
     invoke-restmethod -OutFile ".\temp\pwsh.ps1"  -Uri 'https://aka.ms/install-powershell.ps1'
     .\temp\pwsh.ps1  -Destination "$WinPE_root\Program Files\PowerShell\7"
 
-    #notepad ++
-    invoke-restmethod -OutFile ".\temp\npp.8.3.3.portable.x64.zip" -uri "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.3.3/npp.8.3.3.portable.x64.zip"
-    7z t ".\temp\npp.8.3.3.portable.x64.zip"
-    if($LASTEXITCODE -eq 0){
-        7z x -y ".\temp\npp.8.3.3.portable.x64.zip" -o"$WinPE_root\Program Files\Notepad++" 
-    }
-    #launchbar
-    Invoke-RestMethod -OutFile ".\temp\LaunchBar_x64.exe" -Uri "https://www.lerup.com/php/download.php?LaunchBar/LaunchBar_x64.exe"
-    copy-item ".\temp\LaunchBar_x64.exe" -Destination "$WinPE_root\windows\system32\" -verbose
-
-    #doublecmd
-    Invoke-RestMethod -OutFile ".\temp\doublecmd-1.0.5.x86_64-win64.zip" -uri "https://deac-fra.dl.sourceforge.net/project/doublecmd/DC for Windows 64 bit/Double Commander 1.0.5 beta/doublecmd-1.0.5.x86_64-win64.zip"
-    7z t ".\temp\doublecmd-1.0.5.x86_64-win64.zip"
-    if($LASTEXITCODE -eq 0){
-        7z x -y ".\temp\doublecmd-1.0.5.x86_64-win64.zip" -o"$WinPE_root\Program Files" 
-    }    
+    
     #utils
     $json=@"
 {
