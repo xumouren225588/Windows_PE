@@ -1,0 +1,409 @@
+name: Build Auto-Deploy WinPE
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: '选择架构'
+        required: true
+        default: 'amd64'
+        type: choice
+        options:
+          - amd64
+          - x86
+          - arm64
+
+jobs:
+  build-winpe:
+    name: Build Auto-Deploy WinPE
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Install Windows ADK with WinPE Addon
+        shell: pwsh
+        run: |
+          Write-Host "========================================" -ForegroundColor Green
+          Write-Host "正在安装 Windows ADK 和 WinPE 加载项..." -ForegroundColor Green
+          Write-Host "========================================" -ForegroundColor Green
+          
+          if (-not (Test-Path "$env:ALLUSERSPROFILE\chocolatey\choco.exe")) {
+            Write-Host "安装 Chocolatey..." -ForegroundColor Yellow
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+          }
+          
+          Write-Host "安装 Windows ADK..." -ForegroundColor Yellow
+          choco install windows-adk-all -y --no-progress
+          
+          Write-Host "安装 WinPE 加载项..." -ForegroundColor Yellow
+          choco install windows-adk-winpe -y --no-progress
+          
+          Write-Host "ADK 和 WinPE 加载项安装完成！" -ForegroundColor Green
+      
+      - name: Build WinPE with Auto-Deploy Scripts
+        shell: pwsh
+        run: |
+          $arch = "${{ github.event.inputs.architecture || 'amd64' }}"
+          $workingDir = "C:\WinPE_$arch"
+          $outputIso = "$env:GITHUB_WORKSPACE\AutoDeploy_WinPE_$arch.iso"
+          $mountDir = Join-Path $workingDir "mount"
+          
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host "开始构建 Auto-Deploy WinPE $arch" -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
+          
+          # 设置 ADK 环境
+          $adkPath = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit"
+          $deploymentToolsPath = Join-Path $adkPath "Deployment Tools"
+          $winpePath = Join-Path $adkPath "Windows Preinstallation Environment"
+          
+          $envBatch = Join-Path $deploymentToolsPath "DandISetEnv.bat"
+          if (Test-Path $envBatch) {
+            cmd /c "`"$envBatch`" && set" | ForEach-Object {
+              if ($_ -match "^(.*?)=(.*)$") {
+                [Environment]::SetEnvironmentVariable($matches[1], $matches[2], "Process")
+              }
+            }
+          }
+          
+          # 清理并创建工作目录
+          if (Test-Path $workingDir) {
+            Remove-Item -Path $workingDir -Recurse -Force
+          }
+          
+          Write-Host "运行 copype $arch $workingDir ..." -ForegroundColor Yellow
+          $copypeCmd = Join-Path $winpePath "copype.cmd"
+          & $copypeCmd $arch $workingDir
+          if ($LASTEXITCODE -ne 0) { throw "copype 失败" }
+          
+          # 挂载 boot.wim
+          $wimPath = Join-Path $workingDir "media\sources\boot.wim"
+          New-Item -ItemType Directory -Path $mountDir -Force | Out-Null
+          
+          Write-Host "挂载 boot.wim..." -ForegroundColor Yellow
+          dism /Mount-Image /ImageFile:"$wimPath" /Index:1 /MountDir:"$mountDir"
+          if ($LASTEXITCODE -ne 0) { throw "挂载失败" }
+          
+          try {
+            # 添加必要组件
+            $ocPath = Join-Path $winpePath "$arch\WinPE_OCs"
+            $components = @(
+              "WinPE-WMI.cab",
+              "WinPE-NetFx.cab",
+              "WinPE-Scripting.cab",
+              "WinPE-PowerShell.cab",
+              "WinPE-StorageWMI.cab",
+              "WinPE-HTA.cab"
+            )
+            
+            foreach ($component in $components) {
+              $pkgPath = Join-Path $ocPath $component
+              if (Test-Path $pkgPath) {
+                Write-Host "添加组件: $component" -ForegroundColor Yellow
+                dism /Image:"$mountDir" /Add-Package /PackagePath:"$pkgPath" /Quiet
+              }
+            }
+            
+            # 添加中文语言支持
+            $langPack = Join-Path $ocPath "zh-cn\lp.cab"
+            if (Test-Path $langPack) {
+              dism /Image:"$mountDir" /Add-Package /PackagePath:"$langPack" /Quiet
+            }
+            
+            # 创建部署脚本目录
+            $deployDir = Join-Path $mountDir "Deploy"
+            New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
+            
+            # 创建 check_usb.vbs - 检查0号磁盘是否是U盘
+            $vbsContent = @'
+On Error Resume Next
+Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+Set drive = wmi.Get("Win32_DiskDrive.DeviceID='\\.\PHYSICALDRIVE0'")
+If Err.Number <> 0 Then
+    Msgbox Err.Description
+    WScript.Quit 1
+End If
+If drive.InterfaceType = "IDE" Or drive.InterfaceType = "SCSI" Then
+    WScript.Quit 0
+Else
+    MsgBox "Assertion failed."
+    WScript.Quit 1
+End If
+'@
+            Set-Content -Path (Join-Path $deployDir "check_usb.vbs") -Value $vbsContent -Encoding ASCII
+            
+            # 创建主部署脚本 deploy.cmd
+            $deployCmd = @'
+@echo off
+chcp 65001 >nul
+title Windows 自动部署系统
+color 0A
+
+echo ========================================
+echo    Windows 自动部署系统
+echo    启动时间: %date% %time%
+echo ========================================
+echo.
+
+:: 初始化 WinPE 环境
+echo [1/5] 正在初始化 WinPE 环境...
+wpeinit
+wpeutil UpdateBootInfo
+
+:: 等待系统稳定
+timeout /t 3 /nobreak >nul
+
+:: 检查0号磁盘是否是U盘
+echo [2/5] 检查磁盘类型...
+cscript //nologo X:\Deploy\check_usb.vbs
+if %errorlevel% neq 0 (
+    echo [错误] 0号磁盘检测失败或不是本地磁盘！
+    echo 请确保系统安装在正确的磁盘上。
+    pause
+    exit /b 1
+)
+echo [信息] 0号磁盘检测通过（IDE/SCSI接口）
+
+:: 查找 update.zip
+echo [3/5] 在所有盘符中查找 update.zip...
+set "UPDATE_FILE="
+for %%d in (C D E F G H I J K L M N O P Q R S T U V W X Y Z) do (
+    if exist "%%d:\update.zip" (
+        echo [发现] 找到 update.zip 位于 %%d:\
+        set "UPDATE_FILE=%%d:\update.zip"
+        set "UPDATE_DRIVE=%%d:"
+        goto :found_update
+    )
+)
+
+if not defined UPDATE_FILE (
+    echo [错误] 未在任何盘符找到 update.zip！
+    echo 请确保 update.zip 位于某个盘符的根目录下。
+    pause
+    exit /b 1
+)
+
+:found_update
+echo [信息] 找到更新包: %UPDATE_FILE%
+
+:: 询问用户确认
+echo.
+echo ========================================
+echo    即将执行以下操作：
+echo    1. 解压 part.txt 到 Ramdisk (X:\)
+echo    2. 对 0号磁盘进行分区（GPT）
+echo    3. 解压 update.zip 到数据盘
+echo    4. 使用 DISM 安装系统镜像
+echo    5. 使用 BCDBoot 修复引导
+echo.
+echo    目标磁盘: 0号磁盘 (PHYSICALDRIVE0)
+echo    更新包: %UPDATE_FILE%
+echo ========================================
+echo.
+set /p confirm="是否继续执行部署? (Y/N): "
+if /I not "%confirm%"=="Y" (
+    echo 用户取消操作，退出...
+    exit /b 0
+)
+
+:: 创建 Ramdisk 并解压 part.txt
+echo [4/5] 准备分区脚本...
+echo 正在创建 Ramdisk...
+wpeutil CreateRamDisk 1024 >nul 2>&1
+if not exist R:\ (
+    echo [警告] 无法创建 Ramdisk，使用 X:\ 代替
+    set "RAMDISK=X:\Ramdisk"
+) else (
+    set "RAMDISK=R:"
+)
+mkdir %RAMDISK% 2>nul
+
+:: 解压 part.txt 从 update.zip
+echo 正在从 update.zip 提取 part.txt...
+powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%UPDATE_FILE%' -DestinationPath '%RAMDISK%' -Force"
+if not exist "%RAMDISK%\part.txt" (
+    echo [错误] 在 update.zip 中未找到 part.txt！
+    pause
+    exit /b 1
+)
+echo [信息] part.txt 已解压到 %RAMDISK%\part.txt
+
+:: 执行 diskpart 分区
+echo.
+echo [5/5] 正在对 0号磁盘进行分区...
+echo 这将清除磁盘上的所有数据！
+echo.
+diskpart /s "%RAMDISK%\part.txt"
+if %errorlevel% neq 0 (
+    echo [错误] 分区操作失败！
+    pause
+    exit /b 1
+)
+echo [信息] 分区完成
+
+:: 确定系统盘和数据盘
+:: 假设 part.txt 创建了盘符，通常系统盘为 C:，数据盘为 D:
+:: 查找解压目标盘（最大的数据分区）
+echo 正在查找数据分区...
+for %%d in (D E F G H) do (
+    if exist "%%d:\" (
+        echo [信息] 发现分区 %%d:\
+        set "DATA_DRIVE=%%d:"
+        goto :found_data
+    )
+)
+set "DATA_DRIVE=D:"
+
+:found_data
+echo [信息] 数据盘确定为: %DATA_DRIVE%
+
+:: 解压 update.zip 到数据盘
+echo 正在解压 update.zip 到 %DATA_DRIVE%\...
+powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%UPDATE_FILE%' -DestinationPath '%DATA_DRIVE%\' -Force"
+if %errorlevel% neq 0 (
+    echo [错误] 解压失败！
+    pause
+    exit /b 1
+)
+echo [信息] 解压完成
+
+:: 查找 install.wim/esd/swm
+echo 正在查找系统镜像...
+set "IMAGE_FILE="
+if exist "%DATA_DRIVE%\install.wim" set "IMAGE_FILE=%DATA_DRIVE%\install.wim"
+if exist "%DATA_DRIVE%\install.esd" set "IMAGE_FILE=%DATA_DRIVE%\install.esd"
+if exist "%DATA_DRIVE%\install.swm" set "IMAGE_FILE=%DATA_DRIVE%\install.swm"
+
+if not defined IMAGE_FILE (
+    echo [错误] 未找到 install.wim/esd/swm！
+    pause
+    exit /b 1
+)
+echo [信息] 找到系统镜像: %IMAGE_FILE%
+
+:: 确定系统盘（通常是 C:）
+set "SYSTEM_DRIVE=C:"
+
+:: 使用 DISM 安装系统
+echo.
+echo ========================================
+echo    正在安装 Windows 系统...
+echo    目标: %SYSTEM_DRIVE%\
+echo    镜像: %IMAGE_FILE%
+echo ========================================
+echo.
+
+:: 格式化系统盘
+format %SYSTEM_DRIVE% /FS:NTFS /Q /Y
+
+:: 使用 DISM 应用镜像
+echo 正在应用系统镜像，这可能需要几分钟...
+dism /Apply-Image /ImageFile:"%IMAGE_FILE%" /Index:1 /ApplyDir:%SYSTEM_DRIVE%\
+if %errorlevel% neq 0 (
+    echo [错误] DISM 应用镜像失败！
+    pause
+    exit /b 1
+)
+echo [信息] 系统镜像应用完成
+
+:: 使用 BCDBoot 修复引导
+echo.
+echo 正在修复系统引导...
+bcdboot %SYSTEM_DRIVE%\Windows /s %SYSTEM_DRIVE% /f ALL
+echo [信息] 引导修复完成
+
+:: 完成
+echo.
+echo ========================================
+echo    部署完成！
+echo    系统已安装到 %SYSTEM_DRIVE%\
+echo    请移除安装介质并重启计算机
+echo ========================================
+echo.
+pause
+'@
+            Set-Content -Path (Join-Path $deployDir "deploy.cmd") -Value $deployCmd -Encoding ASCII
+            
+            # 创建自定义 Startnet.cmd
+            $startnetContent = @'
+@echo off
+echo 正在启动自动部署环境...
+wpeinit
+
+:: 设置显示分辨率（可选）
+wpeutil SetDisplayResolution 1920 1080 32
+
+:: 启动部署脚本
+start cmd /k "X:\Deploy\deploy.cmd"
+
+:: 保持窗口打开
+cmd /k
+'@
+            $startnetPath = Join-Path $mountDir "Windows\System32\Startnet.cmd"
+            Set-Content -Path $startnetPath -Value $startnetContent -Encoding ASCII
+            
+            # 复制必要的工具到 WinPE
+            # 确保有 diskpart、bcdboot、dism 等工具（默认已包含）
+            
+            Write-Host "所有脚本已嵌入 WinPE" -ForegroundColor Green
+            
+          } finally {
+            # 确保卸载镜像
+            Write-Host "提交更改并卸载镜像..." -ForegroundColor Yellow
+            dism /Unmount-Image /MountDir:"$mountDir" /Commit
+            if ($LASTEXITCODE -ne 0) {
+              dism /Unmount-Image /MountDir:"$mountDir" /Discard
+            }
+          }
+          
+          # 创建 ISO
+          Write-Host "创建 ISO 文件..." -ForegroundColor Yellow
+          $makeWinpeCmd = Join-Path $winpePath "MakeWinPEMedia.cmd"
+          & $makeWinpeCmd /ISO /f $workingDir $outputIso
+          if ($LASTEXITCODE -ne 0) { throw "MakeWinPEMedia 失败" }
+          
+          # 验证
+          if (Test-Path $outputIso) {
+            $size = [math]::Round((Get-Item $outputIso).Length / 1MB, 2)
+            Write-Host "ISO 创建成功: $outputIso ($size MB)" -ForegroundColor Green
+          }
+      
+      - name: Generate Documentation
+        shell: pwsh
+        run: |
+          $arch = "${{ github.event.inputs.architecture || 'amd64' }}"
+          $doc = @"
+# 使用说明
+- 请使用[Rufus](https://rufus.ie)将iso镜像写入U盘
+"@
+          doc | Out-File -FilePath "README.md" -Encoding utf8
+      
+  
+    - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          name: AutoDeploy_WinPE_${{ github.event.inputs.architecture || 'amd64' }}_${{ github.run_number }}
+          path: |
+            AutoDeploy_WinPE_*.iso
+            README.md
+          retention-days: 30
+      
+      - name: Release to GitHub
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            AutoDeploy_WinPE_*.iso
+            README.md
+          name: Auto-Deploy WinPE ${{ github.ref_name }}
+          body: |
+            # 使用说明
+            - 请使用[Rufus](https://rufus.ie)将iso镜像写入U盘
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
