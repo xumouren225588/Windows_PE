@@ -89,7 +89,7 @@ jobs:
         shell: pwsh
         run: choco install windows-adk-all  -y # https://go.microsoft.com/fwlink/?linkid=2165884
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Build the WinPE image
         shell: pwsh
@@ -100,7 +100,7 @@ jobs:
         run: |
           get-childitem . -Recurse -File | select @{n="File";e={$_.Fullname| Resolve-Path -Relative }}, @{n="SHA256_filehash";e={ ($_.fullname | Get-FileHash -Algorithm SHA256).hash }} | Export-Csv -Path .\filelist.csv -Delimiter ";"
       - name: upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if:  ${{ ! startsWith(github.ref, 'refs/tags/') }}
         with:
           name: WinPE_amd64
