@@ -11,7 +11,6 @@ echo.
 
 :: 初始化 WinPE 环境
 echo [1/5] 正在初始化 WinPE 环境...
-wpeinit
 wpeutil UpdateBootInfo
 
 :: 等待系统稳定
