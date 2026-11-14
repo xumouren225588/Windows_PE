@@ -56,6 +56,8 @@ jobs:
     #   INPUT_BRANDING: ${{ github.event.inputs.branding }}
     #   INPUT_MDT: ${{ github.event.inputs.MDT }}
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       # - name: Set if github.event.inputs.branding  is empty
       #   shell: pwsh	
@@ -125,7 +127,7 @@ jobs:
       #       .\filelist.csv
       #     if-no-files-found: error
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             *.iso
