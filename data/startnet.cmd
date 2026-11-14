@@ -28,7 +28,7 @@ goto menu
 cls
 echo Running DiskGenius...
 echo.
-DiskGenius.exe
+start /WAIT DiskGenius.exe
 if errorlevel 1 (
     echo DiskGenius not found or failed to start.
     echo Please make sure DiskGenius.exe is in the system32 directory.
@@ -42,7 +42,7 @@ goto menu
 cls
 echo Running WinNTSetup...
 echo.
-winns.exe
+start /WAIT winns.exe
 if errorlevel 1 (
     echo WinNTSetup not found or failed to start.
     echo Please make sure WinNTSetup.exe is in the system32 directory.
