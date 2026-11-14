@@ -104,11 +104,7 @@ jobs:
           dism /Mount-Image /ImageFile:"%ISO_ROOT%\sources\boot.wim" /index:1 /MountDir:"%WINPE_ROOT%"
           dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\zh-cn\lp.cab"
           dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\WinPE-FontSupport-ZH-CN.cab"
-          echo "run python"
           python get-dg.py
-          echo "run curl"
-          curl.exe -u "%AUTH_CREDENTIALS%" -o data/winns.exe https://webdav.download.ru/winns.exe
-          echo "run xcopy"
           xcopy "data\*" "%WINPE_ROOT%\Windows\System32\" /E /H /Y
           dism /Unmount-Image /MountDir:"%WINPE_ROOT%" /Commit
           call MakeWinPEMedia /ISO "%WORKDIR%\WinPE" "%WORKDIR%\Imageinstaller-%GITHUB_REF_NAME%-amd64.iso"
