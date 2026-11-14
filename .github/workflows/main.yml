@@ -2,36 +2,31 @@
 #
 name: Create WinPE_amd64.iso
 # Controls when the workflow will run
-#on:
-  # Triggers the workflow on push or pull request events but only for the master branch
-  # push:
-  #   branches: [ master ]
-  # pull_request:
-  #  branches: [ master ]
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*' # 当推送形如 v1.0.0 的标签时触发
 
   # Allows you to run this workflow manually from the Actions tab
   # If a default parameter is not set, the default value of the input is false for a boolean, 0 for a number, and "" for a string.
-  workflow_dispatch:
-    inputs:
-      branding:
-        description: 'Include drivers'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-        - none
-        - all
-        - hp
-        - dell
-        - lenovo
-        - vmware
-      MDT:
-        description: 'Include MDT'
-        required: true
-        type: boolean
+  # workflow_dispatch:
+  #   inputs:
+  #     branding:
+  #       description: 'Include drivers'
+  #       required: true
+  #       default: 'all'
+  #       type: choice
+  #       options:
+  #       - none
+  #       - all
+  #       - hp
+  #       - dell
+  #       - lenovo
+  #       - vmware
+  #     MDT:
+  #       description: 'Include MDT'
+  #       required: true
+  #       type: boolean
 
 
 
@@ -57,26 +52,26 @@ jobs:
 
 
   build:
-    env:
-      INPUT_BRANDING: ${{ github.event.inputs.branding }}
-      INPUT_MDT: ${{ github.event.inputs.MDT }}
+    # env:
+    #   INPUT_BRANDING: ${{ github.event.inputs.branding }}
+    #   INPUT_MDT: ${{ github.event.inputs.MDT }}
     runs-on: windows-latest
     steps:
-      - name: Set if github.event.inputs.branding  is empty
-        shell: pwsh	
-        if: "${{ github.event.inputs.branding == null }}"
-        run: |
-          echo "INPUT_BRANDING=all" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
-      - name: Set env if github.event.inputs.mdt is empty
-        shell: pwsh	
-        if: ${{ github.event.inputs.MDT == null }}
-        run: |
-          echo "INPUT_MDT=0" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+      # - name: Set if github.event.inputs.branding  is empty
+      #   shell: pwsh	
+      #   if: "${{ github.event.inputs.branding == null }}"
+      #   run: |
+      #     echo "INPUT_BRANDING=all" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
+      # - name: Set env if github.event.inputs.mdt is empty
+      #   shell: pwsh	
+      #   if: ${{ github.event.inputs.MDT == null }}
+      #   run: |
+      #     echo "INPUT_MDT=0" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf-8 -Append
           
-      - name: Print the input values to STDOUT
-        shell: pwsh
-        run: |
-          "The tags are:`n`tMDT: ${env:INPUT_MDT}`n`tBRANDING: ${env:INPUT_BRANDING} `n`tWorkspace: ${env:GITHUB_WORKSPACE}" | write-output
+      # - name: Print the input values to STDOUT
+      #   shell: pwsh
+      #   run: |
+      #     "The tags are:`n`tMDT: ${env:INPUT_MDT}`n`tBRANDING: ${env:INPUT_BRANDING} `n`tWorkspace: ${env:GITHUB_WORKSPACE}" | write-output
 
       - name: Install Choco
         shell: pwsh
@@ -85,33 +80,52 @@ jobs:
             [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
             Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
           }
-      - name: Install ADK
-        shell: pwsh
-        run: choco install windows-adk-all  -y # https://go.microsoft.com/fwlink/?linkid=2165884
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Build the WinPE image
-        shell: pwsh
-        run: .\New-WinPEImage.ps1 -branding $env:INPUT_BRANDING -mdt $($env:INPUT_MDT -eq '1') -arch "amd64" -workingDirectory $env:GITHUB_WORKSPACE
-
-      - name: Generate filelist
+      - name: Install ADK and requests
         shell: pwsh
         run: |
-          get-childitem . -Recurse -File | select @{n="File";e={$_.Fullname| Resolve-Path -Relative }}, @{n="SHA256_filehash";e={ ($_.fullname | Get-FileHash -Algorithm SHA256).hash }} | Export-Csv -Path .\filelist.csv -Delimiter ";"
-      - name: upload artifact
-        uses: actions/upload-artifact@v4
-        if:  ${{ ! startsWith(github.ref, 'refs/tags/') }}
-        with:
-          name: WinPE_amd64
-          path: |
-            .\WinPE_amd64.iso
-            .\filelist.csv
-          if-no-files-found: error
+          choco install windows-adk-all  -y # https://go.microsoft.com/fwlink/?linkid=2165884
+          pip install requests
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Build image
+        shell: cmd
+        run: |
+          set "WORKDIR=%GITHUB_WORKSPACE%"
+          set "ADK_INST_PATH=%ProgramFiles(x86)%\Windows Kits\10\Assessment and Deployment Kit"
+          set "WINPE_PATH=%ADK_INST_PATH%\Windows Preinstallation Environment"
+          set "DITE=%ADK_INST_PATH%\Deployment Tools\DandISetEnv.bat"
+          set "WINPE_ROOT=%WORKDIR%\WinPE\mount"
+          set "ISO_ROOT=%WORKDIR%\WinPE\media"
+          "%DITE%"
+          copype amd64 "%WORKDIR%\WinPE"
+          dism /Mount-Image /ImageFile:"%ISO_ROOT%\sources\boot.wim" /index:1 /MountDir:"%WINPE_ROOT%"
+          dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\zh-cn\lp.cab"
+          dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\WinPE-FontSupport-ZH-CN.cab"
+          python get-dg.py
+          curl.exe -u %AUTH_CREDENTIALS% -L -o data/winns.exe https://webdav.download.ru/winns.exe
+          xcopy "data\*" "%WINPE_ROOT%\Windows\System32\" /E /H /Y
+          dism /Unmount-Image /MountDir:"%WINPE_ROOT%" /Commit
+          MakeWinPEMedia /ISO "%WORKDIR%\WinPE" "%WORKDIR%\Imageinstaller-%GITHUB_REF_NAME%-amd64.iso"
+          
+      # - name: Build the WinPE image
+      #   shell: pwsh
+      #   run: .\New-WinPEImage.ps1 -branding $env:INPUT_BRANDING -mdt $($env:INPUT_MDT -eq '1') -arch "amd64" -workingDirectory $env:GITHUB_WORKSPACE
+
+      # - name: Generate filelist
+      #   shell: pwsh
+      #   run: |
+      #     get-childitem . -Recurse -File | select @{n="File";e={$_.Fullname| Resolve-Path -Relative }}, @{n="SHA256_filehash";e={ ($_.fullname | Get-FileHash -Algorithm SHA256).hash }} | Export-Csv -Path .\filelist.csv -Delimiter ";"
+      # - name: upload artifact
+      #   uses: actions/upload-artifact@v4
+      #   if:  ${{ ! startsWith(github.ref, 'refs/tags/') }}
+      #   with:
+      #     name: WinPE_amd64
+      #     path: |
+      #       .\WinPE_amd64.iso
+      #       .\filelist.csv
+      #     if-no-files-found: error
       - name: Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            .\WinPE_amd64.iso
-            .\filelist.csv
+            *.iso
