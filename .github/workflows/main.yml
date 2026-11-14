@@ -99,6 +99,7 @@ jobs:
           set "WINPE_ROOT=%WORKDIR%\WinPE\mount"
           set "ISO_ROOT=%WORKDIR%\WinPE\media"
           call "%DITE%"
+          cd /d "%WORKDIR%"
           call copype amd64 "%WORKDIR%\WinPE"
           dism /Mount-Image /ImageFile:"%ISO_ROOT%\sources\boot.wim" /index:1 /MountDir:"%WINPE_ROOT%"
           dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\zh-cn\lp.cab"
