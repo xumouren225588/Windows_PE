@@ -106,7 +106,7 @@ jobs:
           dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\WinPE-FontSupport-ZH-CN.cab"
           python get-dg.py
           xcopy "data\*" "%WINPE_ROOT%\Windows\System32\" /E /H /Y
-          copy /Y /H "%WINDIR%\System32\oledlg.dll" "%WINPE_ROOT%\Windows\System32\"
+          copy "%WINDIR%\System32\oledlg.dll" "%WINPE_ROOT%\Windows\System32\"
           dism /Unmount-Image /MountDir:"%WINPE_ROOT%" /Commit
           call MakeWinPEMedia /ISO "%WORKDIR%\WinPE" "%WORKDIR%\Imageinstaller-%GITHUB_REF_NAME%-amd64.iso"
           
