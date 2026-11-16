@@ -105,6 +105,7 @@ jobs:
           dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\zh-cn\lp.cab"
           dism /Image:"%WINPE_ROOT%" /Add-Package /PackagePath:"%WINPE_PATH%\amd64\WinPE_OCs\WinPE-FontSupport-ZH-CN.cab"
           python get-dg.py
+          powershell -NoProfile -Command "Expand-Archive -Path '.\winns.zip' -DestinationPath '.\data' -Force"
           xcopy "data\*" "%WINPE_ROOT%\Windows\System32\" /E /H /Y
           copy "%WINDIR%\System32\oledlg.dll" "%WINPE_ROOT%\Windows\System32\"
           dism /Unmount-Image /MountDir:"%WINPE_ROOT%" /Commit
