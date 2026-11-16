@@ -42,7 +42,7 @@ goto menu
 cls
 echo Running WinNTSetup...
 echo.
-start /WAIT winns.exe
+call winns.bat
 if errorlevel 1 (
     echo WinNTSetup not found or failed to start.
     echo Please make sure WinNTSetup.exe is in the system32 directory.
